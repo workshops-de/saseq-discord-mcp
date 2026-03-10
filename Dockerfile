@@ -15,7 +15,9 @@ COPY --from=build /app/target/*.jar app.jar
 
 ENV DISCORD_TOKEN=""
 ENV DISCORD_GUILD_ID=""
+ENV MCP_CLIENT_SECRET=""
+ENV MCP_ADMIN_PASSWORD=""
 
-EXPOSE 8085
+EXPOSE 8080
 
 ENTRYPOINT ["java", "-jar", "app.jar"]
