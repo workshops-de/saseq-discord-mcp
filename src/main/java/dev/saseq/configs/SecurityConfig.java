@@ -30,10 +30,12 @@ import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 
-import java.security.KeyPair;
-import java.security.KeyPairGenerator;
+import java.security.KeyFactory;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.security.spec.RSAPublicKeySpec;
+import java.util.Base64;
 import java.util.UUID;
 
 @Configuration
@@ -45,6 +47,9 @@ public class SecurityConfig {
 
     @org.springframework.beans.factory.annotation.Value("${MCP_ADMIN_PASSWORD}")
     private String adminPassword;
+
+    @org.springframework.beans.factory.annotation.Value("${MCP_RSA_KEY}")
+    private String rsaKeyBase64;
 
     @Bean
     @Order(1)
@@ -140,29 +145,34 @@ public class SecurityConfig {
 
     @Bean
     public JWKSource<SecurityContext> jwkSource() {
-        KeyPair keyPair = generateRsaKey();
-        RSAPublicKey publicKey = (RSAPublicKey) keyPair.getPublic();
-        RSAPrivateKey privateKey = (RSAPrivateKey) keyPair.getPrivate();
-        RSAKey rsaKey = new RSAKey.Builder(publicKey)
-                .privateKey(privateKey)
-                .keyID(UUID.randomUUID().toString())
-                .build();
-        JWKSet jwkSet = new JWKSet(rsaKey);
-        return new ImmutableJWKSet<>(jwkSet);
+        try {
+            String pem = new String(Base64.getDecoder().decode(rsaKeyBase64));
+            String keyData = pem
+                    .replace("-----BEGIN PRIVATE KEY-----", "")
+                    .replace("-----END PRIVATE KEY-----", "")
+                    .replaceAll("\\s", "");
+            byte[] keyBytes = Base64.getDecoder().decode(keyData);
+            PKCS8EncodedKeySpec spec = new PKCS8EncodedKeySpec(keyBytes);
+            KeyFactory kf = KeyFactory.getInstance("RSA");
+            RSAPrivateKey privateKey = (RSAPrivateKey) kf.generatePrivate(spec);
+
+            RSAPublicKey publicKey = (RSAPublicKey) kf.generatePublic(
+                    new RSAPublicKeySpec(privateKey.getModulus(),
+                            java.math.BigInteger.valueOf(65537)));
+
+            RSAKey rsaKey = new RSAKey.Builder(publicKey)
+                    .privateKey(privateKey)
+                    .keyID("discord-mcp-signing-key")
+                    .build();
+            JWKSet jwkSet = new JWKSet(rsaKey);
+            return new ImmutableJWKSet<>(jwkSet);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to load RSA key from MCP_RSA_KEY", ex);
+        }
     }
 
     @Bean
     public JwtDecoder jwtDecoder(JWKSource<SecurityContext> jwkSource) {
         return NimbusJwtDecoder.withJwkSource(jwkSource).build();
-    }
-
-    private static KeyPair generateRsaKey() {
-        try {
-            KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("RSA");
-            keyPairGenerator.initialize(2048);
-            return keyPairGenerator.generateKeyPair();
-        } catch (Exception ex) {
-            throw new IllegalStateException(ex);
-        }
     }
 }
